@@ -1,123 +1,117 @@
-import ai2thor.controller
-import dashscope
+import cv2
+import json
 from http import HTTPStatus
-# GLM大模型的API密钥
-dashscope.api_key = 'sk-7ebcb16ed33147b69272c31c5568b1b5'  # 替换为你的API密钥 sk-7ebcb16ed33147b69272c31c5568b1b5
+import dashscope
 
-# 初始化AI2THOR控制器
-controller = ai2thor.controller.Controller(scene='FloorPlan28')
+from myController import MyController, get_all_objects_in_scene, get_prompt, parse_action
 
-# 重置场景
-event = controller.reset(scene='FloorPlan28')
-l = len(event.metadata['objects'])
-all_objects = [event.metadata['objects'][i]['name'] for i in range(l)]
+# API key for the GLM large model
+# dashscope.api_key = 'sk-37e58610f5544d878ac51c0920ca52b5'  # Replace with your API key 
+
+# User instruction
+instruction = "place a cup with a knife in it on the kitchen counter space"
+scene = 'FloorPlan10'
+
+# Initialize the AI2THOR controller
+controller = MyController()
+# Reset the scene
+event = controller.reset(scene)
+# Get all objects in the scene
+all_objects = get_all_objects_in_scene(event)
 print(all_objects)
 
-# 定义技能集合和其简单描述
-skills = {
-    'MoveAhead': "向前走一段指定的距离",
-    'MoveBack': "向后走一段指定的距离",
-    'MoveRight': "向右走一段指定的距离",
-    'MoveLeft': "向左走一段指定的距离",
-    'LookUp': "向上看指定度数",
-    'LookDown': "向下看指定度数",
-    'RotateRight': "向右旋转指定度数",
-    'RotateLeft': "向左旋转指定度数",
-    'PickupObject': "捡起一个物体,需要传入一个参数，比如apple",
-    'PutObject': "将手中物体放到另一个物体上或指定的位置，需要传入一个参数，表示要放入的容器，比如水槽"
-}
-
-SKILLS = [item.upper() for item in skills.keys()]
-
-# 初始化历史记录列表
+# Get the skill set and their simple descriptions
+with open("action.json", "r", encoding="utf-8") as f:
+    skill_set = json.load(f)
+# Initialize the history list
 history = []
 
-# 用户指令
-instruction = "请把毛巾放到桌子上"
+prompt = get_prompt(instruction, all_objects, skill_set)
 
-model_name = 'qwen-turbo'
-print(f"准备使用{model_name}")
+SKILLS = [item['name'].lower() for item in skill_set]
+
+# 在文件顶部添加IllegalException的定义
+class IllegalException(Exception):
+    """自定义异常类，用于处理非法操作"""
+    pass
+
 def task_is_not_finished(
     instruction:str,
     event
 ):
-    """根据预先设定的任务完成条件来判断当前任务是否完成
+    """Determine whether the current task is completed based on pre-set task completion conditions, here only a simple condition is set
     """
-    if instruction == "请把毛巾放到桌子上":
-    # 检查最后一个动作是否是PutObject，并且是否成功放置了物体
+    if instruction == "place a cup with a knife in it on the kitchen counter space":
+    # Check if the last action is PutObject and if the object was successfully placed
         print(event)
         if event and event.metadata['lastAction'] == 'PutObject' and event.metadata['actionReturn']['placed']:
             return False
         return True
 
-def get_id_by_object_str(objtype:str):
+image = controller.getImg()
 
-    found = []
-    # agent_pos = self.last_event.metadata["position"]
-    # agent_pos = np.array(agent_pos["x"],agent_pos["y"],agent_pos["z"])
-
-    for obj in controller.last_event.metadata["objects"]:
-        if(obj["objectType"].upper() == objtype.upper()):
-            found.append(obj)
-
-    return found[0]['objectId']
-
-# 多轮对话过程
-while 1: # task_is_not_finished():
-    # 设计提示词
-    prompt = f"""
-你是一个智能家庭机器人，你的任务是根据自己的技能来完成用户的指令：“{instruction}”，
-你已经完成的动作是：{history}，
-需要根据自己的技能集合{skills}来完成用户下达的任务，
-请输出下一步你应该采取的技能，你只需要输出英文的skill及其参数，比如PickupObject apple，而不要有任何额外的输出。
-    """
-    print(prompt)
-    input("回车继续") # debug阶段
+img_path = "tmp_image.png"  
 
 
-    # 为此你需要将用户的指令分解为若干技能步骤，每一个步骤都必须是你的技能集合中的一个，你的技能集合是：{skills}，
+# 保存图像到指定路径
+cv2.imwrite(img_path, image)
 
-    # 调用GLM大模型
-    messages = [{'role': 'system', 'content': f'You are a helpful assitant'},
-                {'role': 'user', 'content': prompt}]
 
-    response = dashscope.Generation.call(
-        model=model_name,
-        messages=messages,
-        result_format='message',  # set the result to be "message" format.
+# Multi-turn dialogue process
+next_action_object = ""
+while not 'done' in next_action_object.lower(): # task_is_not_finished(instruction,event):
+    # Get the prompt
+    prompt = get_prompt(instruction, all_objects, skill_set, history_of_actions=history, current_image=img_path)
+    # print(prompt)
+
+    # input("Press Enter to continue")
+
+
+
+    messages = [
+    {
+        "role": "system",
+        "content": [
+        {"text": "You are a helpful assistant."}]
+    },
+    {
+        "role": "user",
+        "content": [
+        {"image": img_path},
+        {"text": prompt}]
+    }]
+
+    response = dashscope.MultiModalConversation.call(
+        # If no environment variable is configured, please replace the following line with: api_key ="sk-xxx"
+        api_key = "sk-7ebcb16ed33147b69272c31c5568b1b5",# os.getenv('DASHSCOPE_API_KEY'),
+        model = 'qwen-vl-plus',
+        messages = messages
     )
-
-    # 检查响应状态
+    # Check the response status
     if response.status_code == HTTPStatus.OK:
-        # 提取下一步动作
-        next_action = response.output.choices[0].message.content
-        print(f"Next action: {next_action}")
+        # Extract the next action
+        next_action_object = response.output.choices[0].message.content[0]["text"]
 
-        # 
-        if next_action.upper() in SKILLS:
+        print(f"Next action: {next_action_object}")
 
-        # next_action有可能包含动作和物品，需要用空格split开，分别得到
-        # 将next_action按空格分割成动作和物品
-            action_parts = next_action.split(" ")
-            if len(action_parts) > 1:
-                next_action = action_parts[0]  # 动作名称
-                object_id = action_parts[1]    # 物品名称
-                # 更新动作参数
-                event = controller.step(action=next_action, objectId=get_id_by_object_str(object_id))
-                continue
-            else:
-                event = controller.step(action=next_action)
+        # parse_action
+        next_action,object_id = parse_action(next_action_object)
+        if not next_action.lower() in SKILLS:
+            raise IllegalException(f"Illegal action: {next_action_object}")
 
-            if event.metadata["lastActionSuccess"] == True:
-                history.append(next_action)
-            else:
-                print(f"执行动作失败: {next_action}")
         else:
-            print(f"Action '{next_action}' is not in the skill set.")
+            print(f"Action '{next_action_object}' is legal.")
+            img, event = controller.execute(next_action_object)
+            if event.metadata["lastActionSuccess"] == True:
+                history.append(next_action_object)
+
+            cv2.imwrite(img_path, img)  # 使用OpenCV保存图像
+            print(f"Image saved to {img_path}")
     else:
         print('Failed to get a valid response from the model.')  
+        print(f"Request failed with status code: {response.status_code}")
+        print(f"Response content: {response.content}")
 
     
-
-# 打印历史记录
-print("历史记录:", history)
+# Print the history
+print("History:", history)
