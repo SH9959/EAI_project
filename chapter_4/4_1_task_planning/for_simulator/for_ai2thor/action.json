@@ -1,7 +1,7 @@
 [
     {
         "id": 1,
-        "name": "Teleport",
+        "name": "GotoObject",
         "description": "Allows the agent to set its pose to anywhere in the scene in a single step.",
         "parameters": [
             {
