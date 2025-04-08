@@ -1,14 +1,12 @@
 import os
 from pprint import pprint
+import time
 import cv2
 import json
 from http import HTTPStatus
 import dashscope
 
 from myController import MyController, get_all_objects_in_scene, get_prompt, parse_action
-
-# API key for the GLM large model
-# dashscope.api_key = 'sk-37e58610f5544d878ac51c0920ca52b5'  # Replace with your API key 
 
 # User instruction
 instruction = "place a cup with a knife in it on the kitchen counter space"
@@ -102,7 +100,7 @@ if __name__ == "__main__":
                 ]
             }
         ]
-
+        start_time_of_request = time.time()
         response = dashscope.MultiModalConversation.call(
             # If no environment variable is configured, please replace the following line with: api_key ="sk-xxx"
             api_key = os.getenv('DASHSCOPE_API_KEY'),
@@ -115,6 +113,7 @@ if __name__ == "__main__":
             seed=1234,
             stream = False,
         )
+        print(f"Request time: {time.time() - start_time_of_request}s")
         # Check the response status
         if response.status_code == HTTPStatus.OK:
             # Extract the next action
@@ -131,7 +130,9 @@ if __name__ == "__main__":
 
             else:
                 print(f"\033[1;97;43mVerify: \033[0mAction '{next_action_object}' is legal.")
+                start_time_of_execute = time.time()
                 img, event, feed_back_message = controller.execute(next_action_object)
+                print(f"Execute time: {time.time() - start_time_of_execute}s")
                 if event.metadata["lastActionSuccess"] == True:
                     history.append((next_action_object, "This action was executed successfully."))
                 else:
